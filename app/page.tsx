@@ -194,6 +194,112 @@ async function applyPromptFix(imageBlob: Blob, prompt: string): Promise<Blob> {
   });
 }
 
+async function preserveWhiteDetails(
+  originalBlob: Blob,
+  cutoutBlob: Blob,
+  strength: number,
+): Promise<Blob> {
+  if (strength <= 0) {
+    return cutoutBlob;
+  }
+
+  const [originalImage, cutoutImage] = await Promise.all([
+    blobToImage(originalBlob),
+    blobToImage(cutoutBlob),
+  ]);
+
+  const width = cutoutImage.width;
+  const height = cutoutImage.height;
+
+  const cutoutCanvas = document.createElement("canvas");
+  cutoutCanvas.width = width;
+  cutoutCanvas.height = height;
+  const cutoutContext = cutoutCanvas.getContext("2d");
+  if (!cutoutContext) {
+    throw new Error("cutout canvas unavailable");
+  }
+
+  const originalCanvas = document.createElement("canvas");
+  originalCanvas.width = width;
+  originalCanvas.height = height;
+  const originalContext = originalCanvas.getContext("2d");
+  if (!originalContext) {
+    throw new Error("original canvas unavailable");
+  }
+
+  cutoutContext.drawImage(cutoutImage, 0, 0, width, height);
+  originalContext.drawImage(originalImage, 0, 0, width, height);
+
+  const cutoutData = cutoutContext.getImageData(0, 0, width, height);
+  const originalData = originalContext.getImageData(0, 0, width, height);
+  const cutoutPixels = cutoutData.data;
+  const originalPixels = originalData.data;
+  const strengthRatio = Math.min(Math.max(strength / 100, 0), 1);
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = (y * width + x) * 4;
+
+      const r = originalPixels[idx];
+      const g = originalPixels[idx + 1];
+      const b = originalPixels[idx + 2];
+      const alpha = cutoutPixels[idx + 3];
+
+      const maxChannel = Math.max(r, g, b);
+      const minChannel = Math.min(r, g, b);
+      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const saturation = maxChannel - minChannel;
+
+      const isNearWhite = luma > 212 && saturation < 36;
+      if (!isNearWhite || alpha > 210) {
+        continue;
+      }
+
+      let neighborAlpha = 0;
+      let count = 0;
+      for (let ky = -1; ky <= 1; ky += 1) {
+        for (let kx = -1; kx <= 1; kx += 1) {
+          if (ky === 0 && kx === 0) {
+            continue;
+          }
+          const nIdx = ((y + ky) * width + (x + kx)) * 4 + 3;
+          neighborAlpha += cutoutPixels[nIdx];
+          count += 1;
+        }
+      }
+
+      const avgNeighborAlpha = neighborAlpha / count;
+      if (avgNeighborAlpha < 26) {
+        continue;
+      }
+
+      const whiteness = Math.min(Math.max((luma - 212) / 42, 0), 1);
+      const targetAlpha = Math.min(255, avgNeighborAlpha + 45 * strengthRatio);
+      const blend = (0.25 + 0.55 * strengthRatio) * (0.35 + 0.65 * whiteness);
+
+      cutoutPixels[idx + 3] = Math.min(
+        255,
+        Math.round(alpha + (targetAlpha - alpha) * blend),
+      );
+      cutoutPixels[idx] = Math.round(cutoutPixels[idx] * (1 - blend) + r * blend);
+      cutoutPixels[idx + 1] = Math.round(cutoutPixels[idx + 1] * (1 - blend) + g * blend);
+      cutoutPixels[idx + 2] = Math.round(cutoutPixels[idx + 2] * (1 - blend) + b * blend);
+    }
+  }
+
+  cutoutContext.putImageData(cutoutData, 0, 0);
+
+  return await new Promise<Blob>((resolve, reject) => {
+    cutoutCanvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("unable to encode preserved output"));
+        return;
+      }
+      resolve(blob);
+    }, "image/png", 1);
+  });
+}
+
 export default function Home() {
   const [inputFile, setInputFile] = useState<File | null>(null);
   const [inputUrl, setInputUrl] = useState<string | null>(null);
@@ -204,6 +310,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFixingOutput, setIsFixingOutput] = useState(false);
   const [fixPrompt, setFixPrompt] = useState("");
+  const [whiteKeepStrength, setWhiteKeepStrength] = useState(42);
   const [status, setStatus] = useState("drop a pic and we will clean it up.");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -327,8 +434,14 @@ export default function Home() {
         URL.revokeObjectURL(outputUrl);
       }
 
-      setOutputUrl(URL.createObjectURL(blob));
-      setOutputBlob(blob);
+      const outputWithWhiteGuard = await preserveWhiteDetails(
+        sourceBlob,
+        blob,
+        whiteKeepStrength,
+      );
+
+      setOutputUrl(URL.createObjectURL(outputWithWhiteGuard));
+      setOutputBlob(outputWithWhiteGuard);
       setProgress(100);
       setStatus("done. transparent png is ready.");
     } catch (cause) {
@@ -369,18 +482,33 @@ export default function Home() {
       </section>
 
       <section className="studio-card">
-        <div className="file-picker" role="group" aria-label="image file picker">
-          <label htmlFor="image-upload" className="file-trigger">
-            choose image
-          </label>
-          <span className="file-name">{inputFile?.name ?? "no file chosen"}</span>
-          <input
-            id="image-upload"
-            className="file-input"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={(event) => onFileChange(event.target.files?.[0])}
-          />
+        <div className="top-controls">
+          <div className="file-picker" role="group" aria-label="image file picker">
+            <label htmlFor="image-upload" className="file-trigger">
+              choose image
+            </label>
+            <span className="file-name">{inputFile?.name ?? "no file chosen"}</span>
+            <input
+              id="image-upload"
+              className="file-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => onFileChange(event.target.files?.[0])}
+            />
+          </div>
+
+          <div className="tune-row tune-row-top">
+            <label htmlFor="white-keep">keep white details</label>
+            <input
+              id="white-keep"
+              type="range"
+              min={0}
+              max={100}
+              value={whiteKeepStrength}
+              onChange={(event) => setWhiteKeepStrength(Number(event.target.value))}
+            />
+            <span>{whiteKeepStrength}%</span>
+          </div>
         </div>
 
         <div className="actions">
