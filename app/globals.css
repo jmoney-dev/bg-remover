@@ -166,9 +166,26 @@ body {
   color: #061120;
 }
 
+.primary-btn-main {
+  padding: 0.92rem 1.55rem;
+  font-size: 1.08rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 10px 28px rgba(67, 135, 235, 0.45);
+}
+
+.primary-btn-main:hover {
+  filter: brightness(1.07);
+  box-shadow: 0 14px 34px rgba(79, 149, 252, 0.52);
+}
+
 .download-btn {
   background: var(--accent);
   color: #eef5ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .primary-btn:hover,
@@ -253,6 +270,79 @@ body {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+
+.fix-composer {
+  margin-top: 0.9rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.fix-composer label {
+  font-size: 0.85rem;
+  color: #cfdbf3;
+}
+
+.fix-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 196, 239, 0.45);
+  background: rgba(18, 27, 45, 0.82);
+  padding: 0.5rem 0.65rem;
+}
+
+.fix-prefix {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: rgba(122, 157, 222, 0.25);
+  color: #dce9ff;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.fix-bar input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #eff5ff;
+  font-size: 1rem;
+  outline: none;
+}
+
+.fix-bar input::placeholder {
+  color: #bfd2f5;
+}
+
+.fix-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.secondary-btn {
+  border: 1px solid rgba(169, 193, 233, 0.5);
+  background: rgba(98, 128, 178, 0.28);
+  color: #f0f5ff;
+  border-radius: 999px;
+  padding: 0.42rem 0.85rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondary-btn.ghost {
+  background: transparent;
+}
+
+.secondary-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 @keyframes rise-in {
