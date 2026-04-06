@@ -475,7 +475,7 @@ export default function Home() {
 
       <section className="hero">
         <p className="eyebrow">100% free • browser only • chill local ai</p>
-        <h1>victor diddy background remover</h1>
+        <h1>joshua diddy background remover</h1>
         <p className="hero-copy">
           jus a little off the top bruh
         </p>

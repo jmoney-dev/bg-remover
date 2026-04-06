@@ -14,7 +14,7 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "victor diddy background remover",
+  title: "joshua diddy background remover",
   description: "jus a little off the top bruh",
 };
 
