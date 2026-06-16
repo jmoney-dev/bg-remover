@@ -4,11 +4,13 @@ import { preload, removeBackground, type Config } from "@imgly/background-remova
 import { useEffect, useMemo, useState } from "react";
 
 const removerConfig: Config = {
-  model: "isnet",
+  model: "isnet_quint8",
   device: "gpu",
+  proxyToWorker: true,
+  rescale: true,
   output: {
     format: "image/png",
-    quality: 1,
+    quality: 0.92,
   },
 };
 
@@ -194,15 +196,11 @@ async function applyPromptFix(imageBlob: Blob, prompt: string): Promise<Blob> {
   });
 }
 
-async function preserveWhiteDetails(
+async function refineCutoutMatte(
   originalBlob: Blob,
   cutoutBlob: Blob,
   strength: number,
 ): Promise<Blob> {
-  if (strength <= 0) {
-    return cutoutBlob;
-  }
-
   const [originalImage, cutoutImage] = await Promise.all([
     blobToImage(originalBlob),
     blobToImage(cutoutBlob),
@@ -235,15 +233,58 @@ async function preserveWhiteDetails(
   const cutoutPixels = cutoutData.data;
   const originalPixels = originalData.data;
   const strengthRatio = Math.min(Math.max(strength / 100, 0), 1);
+  const stride = width * height;
+  const sourceAlpha = new Uint8ClampedArray(stride);
+
+  for (let i = 0; i < stride; i += 1) {
+    sourceAlpha[i] = cutoutPixels[i * 4 + 3];
+  }
 
   for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
       const idx = (y * width + x) * 4;
+      const alphaIndex = y * width + x;
 
       const r = originalPixels[idx];
       const g = originalPixels[idx + 1];
       const b = originalPixels[idx + 2];
-      const alpha = cutoutPixels[idx + 3];
+      const alpha = sourceAlpha[alphaIndex];
+
+      let neighborAlpha = 0;
+      let neighborMin = 255;
+      let neighborMax = 0;
+      let count = 0;
+      for (let ky = -1; ky <= 1; ky += 1) {
+        for (let kx = -1; kx <= 1; kx += 1) {
+          if (ky === 0 && kx === 0) {
+            continue;
+          }
+          const nearbyAlpha = sourceAlpha[(y + ky) * width + x + kx];
+          neighborAlpha += nearbyAlpha;
+          neighborMin = Math.min(neighborMin, nearbyAlpha);
+          neighborMax = Math.max(neighborMax, nearbyAlpha);
+          count += 1;
+        }
+      }
+
+      const avgNeighborAlpha = neighborAlpha / count;
+      const edgeRange = neighborMax - neighborMin;
+
+      if (alpha < 10 && avgNeighborAlpha < 18) {
+        cutoutPixels[idx + 3] = 0;
+        continue;
+      }
+
+      if (alpha > 246 && avgNeighborAlpha > 238) {
+        cutoutPixels[idx + 3] = 255;
+        continue;
+      }
+
+      if (edgeRange > 24 && alpha > 8 && alpha < 248) {
+        const smoothedAlpha = alpha * 0.62 + avgNeighborAlpha * 0.38;
+        const edgeBoost = alpha > 118 && avgNeighborAlpha > alpha ? 8 : 0;
+        cutoutPixels[idx + 3] = Math.min(255, Math.round(smoothedAlpha + edgeBoost));
+      }
 
       const maxChannel = Math.max(r, g, b);
       const minChannel = Math.min(r, g, b);
@@ -251,24 +292,10 @@ async function preserveWhiteDetails(
       const saturation = maxChannel - minChannel;
 
       const isNearWhite = luma > 212 && saturation < 36;
-      if (!isNearWhite || alpha > 210) {
+      if (!isNearWhite || strength <= 0 || alpha > 210) {
         continue;
       }
 
-      let neighborAlpha = 0;
-      let count = 0;
-      for (let ky = -1; ky <= 1; ky += 1) {
-        for (let kx = -1; kx <= 1; kx += 1) {
-          if (ky === 0 && kx === 0) {
-            continue;
-          }
-          const nIdx = ((y + ky) * width + (x + kx)) * 4 + 3;
-          neighborAlpha += cutoutPixels[nIdx];
-          count += 1;
-        }
-      }
-
-      const avgNeighborAlpha = neighborAlpha / count;
       if (avgNeighborAlpha < 26) {
         continue;
       }
@@ -292,7 +319,7 @@ async function preserveWhiteDetails(
   return await new Promise<Blob>((resolve, reject) => {
     cutoutCanvas.toBlob((blob) => {
       if (!blob) {
-        reject(new Error("unable to encode preserved output"));
+        reject(new Error("unable to encode refined output"));
         return;
       }
       resolve(blob);
@@ -314,6 +341,7 @@ export default function Home() {
   const [status, setStatus] = useState("drop a pic and we will clean it up.");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [isModelLoading, setIsModelLoading] = useState(true);
 
   const outputName = useMemo(() => {
     if (!inputFile) {
@@ -326,9 +354,26 @@ export default function Home() {
   }, [inputFile]);
 
   useEffect(() => {
-    preload(removerConfig).catch(() => {
-      // Preload can fail when users are offline.
-    });
+    preload({
+      ...removerConfig,
+      progress: (key, current, total) => {
+        if (!key.startsWith("fetch:")) {
+          return;
+        }
+
+        const safeTotal = total <= 0 ? 1 : total;
+        const percent = Math.round(Math.min(current / safeTotal, 1) * 100);
+        setStatus(`warming up model assets (${percent}%)...`);
+      },
+    })
+      .then(() => {
+        setIsModelLoading(false);
+        setStatus("model ready. drop a pic when you are.");
+      })
+      .catch(() => {
+        setIsModelLoading(false);
+        setStatus("drop a pic and we will clean it up.");
+      });
   }, []);
 
   useEffect(() => {
@@ -434,14 +479,16 @@ export default function Home() {
         URL.revokeObjectURL(outputUrl);
       }
 
-      const outputWithWhiteGuard = await preserveWhiteDetails(
+      setStatus("refining edges and preserving detail...");
+
+      const refinedOutput = await refineCutoutMatte(
         sourceBlob,
         blob,
         whiteKeepStrength,
       );
 
-      setOutputUrl(URL.createObjectURL(outputWithWhiteGuard));
-      setOutputBlob(outputWithWhiteGuard);
+      setOutputUrl(URL.createObjectURL(refinedOutput));
+      setOutputBlob(refinedOutput);
       setProgress(100);
       setStatus("done. transparent png is ready.");
     } catch (cause) {
@@ -475,7 +522,7 @@ export default function Home() {
 
       <section className="hero">
         <p className="eyebrow">100% free • browser only • chill local ai</p>
-        <h1>joshua diddy background remover</h1>
+        <h1>joshua certified background remover</h1>
         <p className="hero-copy">
           jus a little off the top bruh
         </p>
@@ -516,9 +563,9 @@ export default function Home() {
             type="button"
             className="primary-btn primary-btn-main"
             onClick={processImage}
-            disabled={!inputFile || isProcessing}
+            disabled={!inputFile || isProcessing || isModelLoading}
           >
-            {isProcessing ? "processing..." : "remove background"}
+            {isProcessing ? "processing..." : isModelLoading ? "warming model..." : "remove background"}
           </button>
           <a
             className={`download-btn ${!outputUrl ? "disabled" : ""}`}

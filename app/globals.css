@@ -13,15 +13,15 @@
 @theme inline {
   --color-background: var(--paper);
   --color-foreground: var(--ink);
-  --font-sans: var(--font-sora);
-  --font-mono: var(--font-space-mono);
+  --font-sans: "Aptos", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
 }
 
 body {
   margin: 0;
   color: var(--ink);
   color-scheme: dark;
-  font-family: var(--font-sora), sans-serif;
+  font-family: var(--font-sans);
   background:
     linear-gradient(rgba(4, 6, 10, 0.84), rgba(4, 6, 10, 0.84)),
     url("/victor-diddy-bg.png") center/cover fixed no-repeat,
@@ -174,9 +174,9 @@ body {
 .tune-row-top {
   margin-top: 0;
   margin-left: auto;
-  width: 285px;
-  flex: 0 0 auto;
-  grid-template-columns: auto 130px auto;
+  width: min(100%, 330px);
+  flex: 0 1 330px;
+  grid-template-columns: minmax(0, max-content) minmax(72px, 1fr) auto;
   padding: 0.52rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -185,6 +185,7 @@ body {
 
 .tune-row-top label {
   white-space: nowrap;
+  min-width: 0;
 }
 
 .tune-row label {
@@ -200,6 +201,8 @@ body {
 .tune-row span {
   color: #cfdbf3;
   font-size: 0.9rem;
+  min-width: 3ch;
+  text-align: right;
 }
 
 .primary-btn,
