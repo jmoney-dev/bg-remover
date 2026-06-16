@@ -13,15 +13,15 @@
 @theme inline {
   --color-background: var(--paper);
   --color-foreground: var(--ink);
-  --font-sans: "Aptos", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  --font-sans: var(--font-sora);
+  --font-mono: var(--font-space-mono);
 }
 
 body {
   margin: 0;
   color: var(--ink);
   color-scheme: dark;
-  font-family: var(--font-sans);
+  font-family: var(--font-sora), sans-serif;
   background:
     linear-gradient(rgba(4, 6, 10, 0.84), rgba(4, 6, 10, 0.84)),
     url("/victor-diddy-bg.png") center/cover fixed no-repeat,
